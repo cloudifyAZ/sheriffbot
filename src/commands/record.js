@@ -1,6 +1,19 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
-const db = require('../database/db');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const moment = require('moment');
+
+async function getLogChannel(guild, name) {
+    let channel = guild.channels.cache.find(c => c.name === name);
+    if (!channel) {
+        channel = await guild.channels.create({
+            name: name,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+            ]
+        });
+    }
+    return channel;
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -9,7 +22,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('create')
-                .setDescription('Bazada yeni bir vətəndaş profili yaradır')
+                .setDescription('Yeni bir vətəndaş profili (alt başlıq) yaradır')
                 .addStringOption(option => option.setName('ad_soyad').setDescription('Vətəndaşın Adı və Soyadı').setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
@@ -20,40 +33,32 @@ module.exports = {
             subcommand
                 .setName('view')
                 .setDescription('Vətəndaşın bütün qeydlərinə baxış')
-                .addIntegerOption(option => option.setName('id').setDescription('Vətəndaşın unikal ID-si').setRequired(true))),
+                .addStringOption(option => option.setName('id').setDescription('Vətəndaşın ID-si və ya Adı').setRequired(true))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
+        const recordChannel = await getLogChannel(interaction.guild, 'citizen-records');
 
         if (subcommand === 'create') {
             const name = interaction.options.getString('ad_soyad');
-            
-            // Verilənlər bazasına əlavə edirik
-            const info = db.prepare('INSERT INTO citizens (name) VALUES (?)').run(name);
-            const citizenId = info.lastInsertRowid;
+            const allThreads = await recordChannel.threads.fetch();
+            const citizenId = allThreads.threads.size + 1;
             const uniqueName = `[ID: ${citizenId}] ${name}`;
 
             try {
-                // Thread (Alt başlıq) yaradırıq
-                // Qeyd: Bu komanda işlədilən kanalda thread yaradacaq.
-                // Əsas record kanalında olması üçün kanal yoxlanışı edilə bilər.
-                const thread = await interaction.channel.threads.create({
+                const thread = await recordChannel.threads.create({
                     name: uniqueName,
                     autoArchiveDuration: 60,
                     type: ChannelType.GuildPublicThread,
                     reason: 'Yeni vətəndaş profili yaradıldı',
                 });
 
-                // Cədvəldə thread_id-ni yeniləyirik
-                db.prepare('UPDATE citizens SET thread_id = ? WHERE id = ?').run(thread.id, citizenId);
-
                 await interaction.reply({
-                    content: `✅ Yeni vətəndaş profili yaradıldı: **${uniqueName}**\nThread: <#${thread.id}>`,
+                    content: `✅ Yeni vətəndaş profili yaradıldı: **${uniqueName}**\nBura keçid edin: <#${thread.id}>`,
                     ephemeral: false
                 });
             } catch (error) {
-                console.error(error);
-                await interaction.reply({ content: 'Thread yaradarkən xəta baş verdi. Kanaldakı icazələri yoxlayın.', ephemeral: true });
+                await interaction.reply({ content: 'Thread yaradarkən xəta baş verdi.', ephemeral: true });
             }
         }
 
@@ -61,55 +66,50 @@ module.exports = {
             const content = interaction.options.getString('qeyd');
             const thread = interaction.channel;
 
-            if (!thread.isThread()) {
-                return interaction.reply({ content: 'Bu komanda yalnız vətəndaşın alt başlığında (thread) işlədilə bilər.', ephemeral: true });
-            }
-
-            // Thread adına görə ID-ni tapırıq
-            const citizen = db.prepare('SELECT id FROM citizens WHERE thread_id = ?').get(thread.id);
-            if (!citizen) {
-                return interaction.reply({ content: 'Bu thread bazada qeydiyyatda olan bir vətəndaşa aid deyil.', ephemeral: true });
+            if (!thread.isThread() || thread.parentId !== recordChannel.id) {
+                return interaction.reply({ content: 'Bu komanda yalnız vətəndaş qeydləri kanalındakı alt başlıqlarda işlədilə bilər.', ephemeral: true });
             }
 
             const sheriffName = interaction.member.displayName;
             const timestamp = moment().format('DD.MM.YYYY HH:mm');
-
-            db.prepare('INSERT INTO records (citizen_id, sheriff_name, content) VALUES (?, ?, ?)')
-                .run(citizen.id, sheriffName, content);
 
             await thread.send(`✍️ **Qeyd əlavə edildi**\n**Sheriff:** ${sheriffName}\n**Tarix:** ${timestamp}\n**Məzmun:** ${content}`);
             await interaction.reply({ content: 'Qeyd uğurla əlavə edildi.', ephemeral: true });
         }
 
         if (subcommand === 'view') {
-            const id = interaction.options.getInteger('id');
-            const citizen = db.prepare('SELECT * FROM citizens WHERE id = ?').get(id);
+            const search = interaction.options.getString('id');
+            const allThreads = await recordChannel.threads.fetch();
+            const thread = allThreads.threads.find(t => t.name.includes(search));
 
-            if (!citizen) {
-                return interaction.reply({ content: `ID: ${id} ilə vətəndaş tapılmadı.`, ephemeral: true });
+            if (!thread) {
+                return interaction.reply({ content: `"${search}" ilə vətəndaş tapılmadı.`, ephemeral: true });
             }
 
-            const records = db.prepare('SELECT * FROM records WHERE citizen_id = ? ORDER BY created_at DESC').all(id);
+            const messages = await thread.messages.fetch({ limit: 50 });
+            const records = messages.filter(m => m.content.includes('✍️ **Qeyd əlavə edildi**'));
 
             const embed = new EmbedBuilder()
-                .setTitle(`👤 Vətəndaş Profili: ${citizen.name}`)
-                .setDescription(`**Unikal ID:** ${citizen.id}\n**Yaradılma Tarixi:** ${moment(citizen.created_at).format('DD.MM.YYYY')}`)
+                .setTitle(`👤 Vətəndaş Profili: ${thread.name}`)
                 .setColor(0x2b2d31)
                 .setThumbnail(interaction.guild.iconURL());
 
-            if (records.length > 0) {
+            if (records.size > 0) {
                 let recordsList = '';
-                records.forEach(rec => {
-                    const date = moment(rec.created_at).format('DD.MM.YYYY HH:mm');
-                    recordsList += `🔹 **[${date}]** - **${rec.sheriff_name}**\n${rec.content}\n\n`;
+                records.forEach(m => {
+                    const lines = m.content.split('\n');
+                    const sheriff = lines[1]?.replace('**Sheriff:** ', '') || 'Naməlum';
+                    const date = lines[2]?.replace('**Tarix:** ', '') || 'Naməlum';
+                    const contentLog = lines.slice(3).join('\n').replace('**Məzmun:** ', '');
+                    recordsList += `🔹 **[${date}]** - **${sheriff}**\n${contentLog}\n\n`;
                 });
-                // Embed limiti (4096 char) nəzərə alınmalıdır, burada sadə saxlayırıq
-                embed.addFields({ name: '📜 Keçmiş Qeydlər', value: recordsList.substring(0, 1024) || 'Qeyd yoxdur' });
+                embed.addFields({ name: '📜 Keçmiş Qeydlər', value: recordsList.substring(0, 1024) });
             } else {
-                embed.addFields({ name: '📜 Keçmiş Qeydlər', value: 'Bu vətəndaş üçün hələ qeyd yoxdur.' });
+                embed.addFields({ name: '📜 Keçmiş Qeydlər', value: 'Bu vətəndaş üçün hərə qeyd yoxdur.' });
             }
 
             await interaction.reply({ embeds: [embed] });
         }
     },
 };
+

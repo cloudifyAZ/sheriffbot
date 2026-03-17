@@ -1,5 +1,18 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const db = require('../database/db');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+
+async function getLogChannel(guild, name) {
+    let channel = guild.channels.cache.find(c => c.name === name);
+    if (!channel) {
+        channel = await guild.channels.create({
+            name: name,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+            ]
+        });
+    }
+    return channel;
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -21,8 +34,8 @@ module.exports = {
         const item = interaction.options.getString('ne_goturulub');
         const userId = interaction.user.id;
 
-        db.prepare('INSERT INTO warehouse_logs (user_id, item, action) VALUES (?, ?, ?)')
-            .run(userId, item, subcommand.toUpperCase());
+        const warehouseLogChannel = await getLogChannel(interaction.guild, 'warehouse-logs');
+        await warehouseLogChannel.send(`WH:${userId} | ${subcommand.toUpperCase()} | ${item}`);
 
         const embed = new EmbedBuilder()
             .setTitle('📦 Anbar Qeydiyyatı')
@@ -31,9 +44,9 @@ module.exports = {
                 { name: '👤 İstifadəçi', value: `<@${userId}>`, inline: true },
                 { name: '🔧 Hərəkət', value: subcommand === 'take' ? 'Götürüldü' : 'Qaytarıldı', inline: true },
                 { name: '🔫 Əşya', value: item }
-            )
-            .setTimestamp();
+            ).setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
     },
 };
+

@@ -1,10 +1,13 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, REST, Routes, ChannelType, PermissionFlagsBits } = require('discord.js');
-const db = require('./src/database/db');
-const moment = require('moment');
-
+const { Client, GatewayIntentBits, Collection, REST, Routes, ChannelType, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
+const moment = require('moment');
+const express = require('express');
+
+const app = express();
+app.get('/', (req, res) => res.send('SheriffBot 7/24 Aktivdir!'));
+app.listen(process.env.PORT || 3000, () => console.log('✅ Pinger serveri hazırdı.'));
 
 const client = new Client({
     intents: [
@@ -19,13 +22,11 @@ const client = new Client({
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src/commands');
 
-// Bütün .js fayllarını komanda olaraq yükləyirik
 function loadCommands(dir) {
     const files = fs.readdirSync(dir);
     for (const file of files) {
         const filePath = path.join(dir, file);
-        const stat = fs.statSync(filePath);
-        if (stat.isDirectory()) {
+        if (fs.statSync(filePath).isDirectory()) {
             loadCommands(filePath);
         } else if (file.endsWith('.js')) {
             const command = require(filePath);
@@ -35,22 +36,24 @@ function loadCommands(dir) {
         }
     }
 }
-
 loadCommands(commandsPath);
 
-// Eventləri yükləyirik
-const eventsPath = path.join(__dirname, 'src/events');
-if (fs.existsSync(eventsPath)) {
-    const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
-    for (const file of eventFiles) {
-        const filePath = path.join(eventsPath, file);
-        const event = require(filePath);
-        if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args));
-        } else {
-            client.on(event.name, (...args) => event.execute(...args));
-        }
+// Log kanallarını tapmaq və ya yaratmaq üçün funksiya
+async function getLogChannel(guild, name) {
+    let channel = guild.channels.cache.find(c => c.name === name);
+    if (!channel) {
+        channel = await guild.channels.create({
+            name: name,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                {
+                    id: guild.roles.everyone.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                }
+            ]
+        });
     }
+    return channel;
 }
 
 client.on('interactionCreate', async interaction => {
@@ -59,30 +62,28 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
-
         try {
             await command.execute(interaction);
         } catch (error) {
             console.error(error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'Bu komandanı icra edərkən xəta baş verdi!', ephemeral: true });
-            } else {
-                await interaction.reply({ content: 'Bu komandanı icra edərkən xəta baş verdi!', ephemeral: true });
-            }
+            const msg = { content: 'Bu komandanı icra edərkən xəta baş verdi!', ephemeral: true };
+            if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
+            else await interaction.reply(msg);
         }
     }
+
     if (interaction.isButton()) {
+        const dutyLogChannel = await getLogChannel(interaction.guild, 'duty-logs');
         const userId = interaction.user.id;
         const userName = interaction.member.displayName;
 
         if (interaction.customId === 'duty_on') {
-            const activeSession = db.prepare('SELECT id FROM duty_logs WHERE user_id = ? AND end_time IS NULL').get(userId);
-            if (activeSession) {
-                return interaction.reply({ content: 'Siz onsuz da növbədəsiniz!', ephemeral: true });
-            }
+            // Aktiv növbəni yoxlayırıq (log kanalında son mesajlara baxaraq)
+            const logs = await dutyLogChannel.messages.fetch({ limit: 50 });
+            const active = logs.find(m => m.content.includes(`ON:${userId}`));
+            if (active) return interaction.reply({ content: 'Siz onsuz da növbədəsiniz!', ephemeral: true });
 
-            db.prepare('INSERT INTO duty_logs (user_id, user_name, start_time) VALUES (?, ?, ?)')
-                .run(userId, userName, moment().toISOString());
+            await dutyLogChannel.send(`ON:${userId} | ${userName} | ${moment().toISOString()}`);
 
             try {
                 const channelName = `🟢-${userName}`;
@@ -90,57 +91,42 @@ client.on('interactionCreate', async interaction => {
                     name: channelName,
                     type: ChannelType.GuildVoice,
                     permissionOverwrites: [
-                        {
-                            id: interaction.guild.roles.everyone.id,
-                            deny: [PermissionFlagsBits.Connect],
-                        },
-                        {
-                            id: userId,
-                            allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
-                        },
+                        { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.Connect] },
+                        { id: userId, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] },
                     ],
                 });
-
-                await interaction.reply({ content: `✅ Növbə uğurla başladıldı. Sizin üçün özəl kanal yaradıldı: **${channelName}**`, ephemeral: true });
+                await interaction.reply({ content: `✅ Növbə başladıldı. Özəl kanal: **${channelName}**`, ephemeral: true });
             } catch (error) {
-                console.error(error);
-                await interaction.reply({ content: 'Kanal yaradarkən xəta baş verdi, lakin növbəniz qeydə alındı.', ephemeral: true });
+                await interaction.reply({ content: 'Kanal yaradılmadı, amma növbə başladı.', ephemeral: true });
             }
         }
 
         if (interaction.customId === 'duty_off') {
-            const activeSession = db.prepare('SELECT id, start_time FROM duty_logs WHERE user_id = ? AND end_time IS NULL').get(userId);
-            if (!activeSession) {
-                return interaction.reply({ content: 'Siz hazırda növbədə deyilsiniz!', ephemeral: true });
-            }
+            const logs = await dutyLogChannel.messages.fetch({ limit: 50 });
+            const startLog = logs.find(m => m.content.includes(`ON:${userId}`));
+            if (!startLog) return interaction.reply({ content: 'Siz növbədə deyilsiniz!', ephemeral: true });
 
-            const endTime = moment();
-            const startTime = moment(activeSession.start_time);
-            const duration = moment.duration(endTime.diff(startTime)).asMinutes();
+            const startTime = moment(startLog.content.split('|')[2].trim());
+            const duration = Math.round(moment.duration(moment().diff(startTime)).asMinutes());
 
-            db.prepare('UPDATE duty_logs SET end_time = ?, duration_minutes = ? WHERE id = ?')
-                .run(endTime.toISOString(), Math.round(duration), activeSession.id);
+            await startLog.delete();
+            await dutyLogChannel.send(`SUM:${userId} | ${userName} | ${duration} | ${moment().toISOString()}`);
 
             const channelName = `🟢-${userName}`;
             const channel = interaction.guild.channels.cache.find(c => c.name === channelName);
-            if (channel) {
-                await channel.delete().catch(console.error);
-            }
+            if (channel) await channel.delete().catch(() => {});
 
-            await interaction.reply({ content: `🔴 Növbə bitirildi. Ümumi vaxt: **${Math.round(duration)} dəqiqə**.`, ephemeral: true });
+            await interaction.reply({ content: `🔴 Növbə bitdi. Müddət: **${duration} dəqiqə**.`, ephemeral: true });
         }
     }
 
     if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith('fto_eval_modal_')) {
             const cadetId = interaction.customId.replace('fto_eval_modal_', '');
-            const driving = interaction.fields.getTextInputValue('driving');
-            const shooting = interaction.fields.getTextInputValue('shooting');
-            const comms = interaction.fields.getTextInputValue('comms');
-            const comment = interaction.fields.getTextInputValue('comment');
-
-            db.prepare('INSERT INTO fto_evals (cadet_id, fto_id, driving, shooting, communication, comment) VALUES (?, ?, ?, ?, ?, ?)')
-                .run(cadetId, interaction.user.id, driving, shooting, comms, comment);
+            const fields = ['driving', 'shooting', 'comms', 'comment'].map(f => interaction.fields.getTextInputValue(f));
+            
+            const ftoLogChannel = await getLogChannel(interaction.guild, 'fto-logs');
+            await ftoLogChannel.send(`EVAL:${cadetId}|${interaction.user.id}|${fields.join('|')}`);
 
             const embed = new EmbedBuilder()
                 .setTitle('🎓 Kadet Qiymətləndirməsi')
@@ -148,21 +134,17 @@ client.on('interactionCreate', async interaction => {
                 .addFields(
                     { name: '👤 Kadet', value: `<@${cadetId}>`, inline: true },
                     { name: '👨‍🏫 Təlimatçı', value: `<@${interaction.user.id}>`, inline: true },
-                    { name: '🚗 Sürüş', value: `${driving}/5`, inline: true },
-                    { name: '🎯 Atış', value: `${shooting}/5`, inline: true },
-                    { name: '📢 Ünsiyyət', value: `${comms}/5`, inline: true },
-                    { name: '📝 Rəy', value: comment }
-                )
-                .setTimestamp();
+                    { name: '🚗 Sürüş', value: `${fields[0]}/5`, inline: true },
+                    { name: '🎯 Atış', value: `${fields[1]}/5`, inline: true },
+                    { name: '📢 Ünsiyyət', value: `${fields[2]}/5`, inline: true },
+                    { name: '📝 Rəy', value: fields[3] }
+                ).setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
         }
     }
 });
 
-
-client.once('ready', () => {
-    console.log(`✅ Uğurlu giriş edildi! Botun adı: ${client.user.tag}`);
-});
-
-client.login(process.env.TOKEN);
+client.once('ready', () => console.log(`✅ ${client.user.tag} aktivdir!`));
+client.login(process.env.TOKEN);
+
