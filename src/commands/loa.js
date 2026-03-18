@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const moment = require('moment');
 
 async function getLogChannel(guild, name) {
@@ -17,48 +17,41 @@ async function getLogChannel(guild, name) {
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('loa')
-        .setDescription('İcazə (Leave of Absence) müraciəti bildirir')
-        .addStringOption(option => option.setName('başlanğıc').setDescription('Məsələn: 18.03.2026 09:00').setRequired(true))
-        .addStringOption(option => option.setName('bitiş').setDescription('Məsələn: 20.03.2026 09:00').setRequired(true))
-        .addStringOption(option => option.setName('səbəb').setDescription('İcazənin səbəbi').setRequired(true)),
+    .setName('loa')
+    .setDescription('İcazə (Leave of Absence) müraciəti bildirir'),
 
     async execute(interaction) {
-        const startStr = interaction.options.getString('başlanğıc');
-        const endStr = interaction.options.getString('bitiş');
-        const reason = interaction.options.getString('səbəb');
+    const modal = new ModalBuilder()
+        .setCustomId('loa_modal')
+        .setTitle('LOA - İcazə Müraciəti');
 
-        const start = moment(startStr, 'DD.MM.YYYY HH:mm');
-        const end = moment(endStr, 'DD.MM.YYYY HH:mm');
+    const startInput = new TextInputBuilder()
+        .setCustomId('loa_start')
+        .setLabel('Başlama tarixi (DD.MM.YYYY-HH:mm)')
+        .setPlaceholder('18.03.2026-18:33')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-        if (!start.isValid() || !end.isValid()) {
-            return interaction.reply({ content: 'Tarix formatı düzgün deyil! (DD.MM.YYYY HH:mm)', ephemeral: true });
-        }
+    const endInput = new TextInputBuilder()
+        .setCustomId('loa_end')
+        .setLabel('Bitmə tarixi (DD.MM.YYYY-HH:mm)')
+        .setPlaceholder('20.03.2026-18:33')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-        const roleName = 'Aktivsizlik üçün İcazəli'; 
-        let role = interaction.guild.roles.cache.find(r => r.name === roleName);
-        if (!role) {
-            role = await interaction.guild.roles.create({ name: roleName, color: 0x95a5a6 }).catch(() => null);
-        }
+    const reasonInput = new TextInputBuilder()
+        .setCustomId('loa_reason')
+        .setLabel('Səbəb')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
 
-        const loaLogChannel = await getLogChannel(interaction.guild, 'loa-logs');
-        await loaLogChannel.send(`LOA:${interaction.user.id} | ${startStr} | ${endStr} | ${reason}`);
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(startInput),
+        new ActionRowBuilder().addComponents(endInput),
+        new ActionRowBuilder().addComponents(reasonInput),
+    );
 
-        if (moment().isSameOrAfter(start)) {
-            if (role) await interaction.member.roles.add(role).catch(() => {});
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle('📅 LOA - İcazə Müraciəti')
-            .setColor(0xe67e22)
-            .addFields(
-                { name: '👤 İstifadəçi', value: `<@${interaction.user.id}>`, inline: true },
-                { name: '📅 Başlama', value: startStr, inline: true },
-                { name: '📅 Bitmə', value: endStr, inline: true },
-                { name: '📝 Səbəb', value: reason }
-            ).setTimestamp();
-
-        await interaction.reply({ embeds: [embed] });
+    await interaction.showModal(modal);
     },
 };
 
