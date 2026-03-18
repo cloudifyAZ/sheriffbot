@@ -146,5 +146,9 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.once('ready', () => console.log(`✅ ${client.user.tag} aktivdir!`));
+client.on('guildMemberAdd', async member => {
+    const role = member.guild.roles.cache.get('1482726948580102218');
+    if (role) await member.roles.add(role).catch(console.error);
+});
 client.login(process.env.TOKEN);
 
