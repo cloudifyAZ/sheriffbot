@@ -141,7 +141,62 @@ client.on('interactionCreate', async interaction => {
                 ).setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
+        } 
+        
+        // --- YENİ ƏLAVƏ EDİLƏN LOA MODALI ---
+        else if (interaction.customId === 'loa_modal') {
+            const startStr = interaction.fields.getTextInputValue('loa_start');
+            const endStr = interaction.fields.getTextInputValue('loa_end');
+            const reason = interaction.fields.getTextInputValue('loa_reason');
+
+            const start = moment(startStr, 'DD.MM.YYYY-HH:mm');
+            const end = moment(endStr, 'DD.MM.YYYY-HH:mm');
+
+            if (!start.isValid() || !end.isValid()) {
+                return interaction.reply({ content: '❌ Tarix formatı düzgün deyil! (DD.MM.YYYY-HH:mm)', ephemeral: true });
+            }
+
+            const loaLogChannel = await getLogChannel(interaction.guild, 'loa-logs');
+            await loaLogChannel.send(`LOA:${interaction.user.id} | ${startStr} | ${endStr} | ${reason}`);
+
+            const loaRoleId = '1482726948705931266';
+            const now = moment();
+
+            // Başlama vaxtına qədər gözlə, sonra rolu ver
+            const msUntilStart = start.diff(now);
+            const msUntilEnd = end.diff(now);
+
+            if (msUntilStart <= 0) {
+                // Artıq başlayıb, rolu indi ver
+                await interaction.member.roles.add(loaRoleId).catch(console.error);
+            } else {
+                setTimeout(async () => {
+                    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                    if (member) await member.roles.add(loaRoleId).catch(console.error);
+                }, msUntilStart);
+            }
+
+            // Bitiş vaxtında rolu al
+            if (msUntilEnd > 0) {
+                setTimeout(async () => {
+                    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+                    if (member) await member.roles.remove(loaRoleId).catch(console.error);
+                }, msUntilEnd);
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('📅 LOA - İcazə Müraciəti')
+                .setColor(0xe67e22)
+                .addFields(
+                    { name: '👤 İstifadəçi', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: '📅 Başlama', value: startStr, inline: true },
+                    { name: '📅 Bitmə', value: endStr, inline: true },
+                    { name: '📝 Səbəb', value: reason }
+                ).setTimestamp();
+
+            await interaction.reply({ embeds: [embed] });
         }
+        // --- LOA MODALI BİTDİ ---
     }
 });
 
@@ -151,4 +206,3 @@ client.on('guildMemberAdd', async member => {
     if (role) await member.roles.add(role).catch(console.error);
 });
 client.login(process.env.TOKEN);
-
