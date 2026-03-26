@@ -8,56 +8,35 @@ module.exports = {
             subcommand
                 .setName('eval')
                 .setDescription('Kadet qiymətləndirməsi')
-                .addUserOption(option => option.setName('user').setDescription('Qiymətləndiriləcək kadet').setRequired(true)))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles), // Təlimatçı icazəsi
+                .addUserOption(option => option.setName('user').setDescription('Kadet').setRequired(true))
+                .addIntegerOption(o => o.setName('driving').setDescription('Nəqliyyat (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+                .addIntegerOption(o => o.setName('shooting').setDescription('Atış (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+                .addIntegerOption(o => o.setName('comms').setDescription('Ünsiyyət (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+                .addIntegerOption(o => o.setName('situation').setDescription('Situasiya İdarəetməsi (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+                .addIntegerOption(o => o.setName('report').setDescription('Hesabat və cərimə (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+                .addIntegerOption(o => o.setName('command').setDescription('Komandantlıq (1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
     async execute(interaction) {
         if (interaction.options.getSubcommand() === 'eval') {
             const targetUser = interaction.options.getUser('user');
-
+            
+            // Xalları burada yadda saxlayıb, modal təsdiqlənəndə istifadə edə bilərsiniz
+            // const driving = interaction.options.getInteger('driving'); ...
+            
+            // Yalnız Rəy üçün Modal açırıq
             const modal = new ModalBuilder()
                 .setCustomId(`fto_eval_modal_${targetUser.id}`)
-                .setTitle(`${targetUser.username} Qiymətləndirilməsi`);
-
-            const drivingInput = new TextInputBuilder()
-                .setCustomId('driving')
-                .setLabel('Nəqliyyat İdarəetməsi (1-5)')
-                .setStyle(TextInputStyle.Short)
-                .setMinLength(1)
-                .setMaxLength(1)
-                .setPlaceholder('1...5')
-                .setRequired(true);
-
-            const shootingInput = new TextInputBuilder()
-                .setCustomId('shooting')
-                .setLabel('Atış Qabiliyyəti (1-5)')
-                .setStyle(TextInputStyle.Short)
-                .setMinLength(1)
-                .setMaxLength(1)
-                .setPlaceholder('1...5')
-                .setRequired(true);
-
-            const commsInput = new TextInputBuilder()
-                .setCustomId('comms')
-                .setLabel('Ünsiyyət Qabiliyyəti (1-5)')
-                .setStyle(TextInputStyle.Short)
-                .setMinLength(1)
-                .setMaxLength(1)
-                .setPlaceholder('1...5')
-                .setRequired(true);
+                .setTitle(`${targetUser.username} - Qısa Rəy`);
 
             const commentInput = new TextInputBuilder()
                 .setCustomId('comment')
-                .setLabel('Qısa Rəy')
+                .setLabel('Kadet haqqında qısa rəyiniz')
                 .setStyle(TextInputStyle.Paragraph)
                 .setRequired(true);
 
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(drivingInput),
-                new ActionRowBuilder().addComponents(shootingInput),
-                new ActionRowBuilder().addComponents(commsInput),
-                new ActionRowBuilder().addComponents(commentInput)
-            );
+            modal.addComponents(new ActionRowBuilder().addComponents(commentInput));
 
             await interaction.showModal(modal);
         }
