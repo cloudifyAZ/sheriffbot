@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const moment = require('moment');
 const express = require('express');
+const ftoSessions = new Map();
 
 const app = express();
 app.get('/', (req, res) => res.send('SheriffBot 7/24 Aktivdir!'));
@@ -75,83 +76,99 @@ client.on('interactionCreate', async interaction => {
     // 🔹 1-ci modal
     if (interaction.isModalSubmit() && interaction.customId.startsWith('fto_eval_1_')) {
 
-        const userId = interaction.customId.split('_')[3];
+    const userId = interaction.customId.split('_')[3];
 
-        const data1 = {
-            driving: interaction.fields.getTextInputValue('driving'),
-            shooting: interaction.fields.getTextInputValue('shooting'),
-            comms: interaction.fields.getTextInputValue('comms'),
-            situation: interaction.fields.getTextInputValue('situation'),
-            command: interaction.fields.getTextInputValue('command'),
-        };
+    const data1 = {
+        driving: interaction.fields.getTextInputValue('driving'),
+        shooting: interaction.fields.getTextInputValue('shooting'),
+        comms: interaction.fields.getTextInputValue('comms'),
+        situation: interaction.fields.getTextInputValue('situation'),
+        command: interaction.fields.getTextInputValue('command'),
+    };
 
-        const modal2 = new ModalBuilder()
-            .setCustomId(`fto_eval_2_${userId}_${Buffer.from(JSON.stringify(data1)).toString('base64')}`)
-            .setTitle('Qiymətləndirmə (2/2)');
+    // 🔥 JSON yox → Map istifadə edirik
+    ftoSessions.set(interaction.user.id, {
+        cadetId: userId,
+        data1
+    });
 
-        const reportInput = new TextInputBuilder()
-            .setCustomId('report')
-            .setLabel('Hesabat və Cərimə Yazma (1-5)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
+    const modal2 = new ModalBuilder()
+        .setCustomId(`fto_eval_2_${interaction.user.id}`) // qısa ID
+        .setTitle('Qiymətləndirmə (2/2)');
 
-        const commentInput = new TextInputBuilder()
-            .setCustomId('comment')
-            .setLabel('Qısa Rəy')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
+    const reportInput = new TextInputBuilder()
+        .setCustomId('report')
+        .setLabel('Hesabat və Cərimə Yazma (1-5)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-        modal2.addComponents(
-            new ActionRowBuilder().addComponents(reportInput),
-            new ActionRowBuilder().addComponents(commentInput)
-        );
+    const commentInput = new TextInputBuilder()
+        .setCustomId('comment')
+        .setLabel('Qısa Rəy')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
 
-        return await interaction.showModal(modal2);
-    }
+    modal2.addComponents(
+        new ActionRowBuilder().addComponents(reportInput),
+        new ActionRowBuilder().addComponents(commentInput)
+    );
+
+    return await interaction.showModal(modal2);
+}
 
     // 🔹 2-ci modal FINAL
     if (interaction.isModalSubmit() && interaction.customId.startsWith('fto_eval_2_')) {
 
-        const parts = interaction.customId.split('_');
-        const cadetId = parts[3];
-        const data1 = JSON.parse(Buffer.from(parts[4], 'base64').toString());
+    const session = ftoSessions.get(interaction.user.id);
 
-        const report = interaction.fields.getTextInputValue('report');
-        const comment = interaction.fields.getTextInputValue('comment');
-
-        const scores = [
-            Number(data1.driving),
-            Number(data1.shooting),
-            Number(data1.comms),
-            Number(data1.situation),
-            Number(data1.command),
-            Number(report)
-        ];
-
-        const average = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-
-        const ftoLogChannel = await getLogChannel(interaction.guild, 'fto-logs');
-        await ftoLogChannel.send(`EVAL:${cadetId}|${interaction.user.id}|${scores.join('|')}|${comment}`);
-
-        const embed = new EmbedBuilder()
-            .setTitle('🎓 Kadet Qiymətləndirməsi')
-            .setColor(0x3498db)
-            .addFields(
-                { name: '👤 Kadet', value: `<@${cadetId}>`, inline: true },
-                { name: '👨‍🏫 Təlimatçı', value: `<@${interaction.user.id}>`, inline: true },
-                { name: '🚗 Nəqliyyat', value: data1.driving, inline: true },
-                { name: '🔫 Atış', value: data1.shooting, inline: true },
-                { name: '💬 Ünsiyyət', value: data1.comms, inline: true },
-                { name: '🧠 Situasiya', value: data1.situation, inline: true },
-                { name: '👮 Komandantlıq', value: data1.command, inline: true },
-                { name: '📝 Hesabat', value: report, inline: true },
-                { name: '⭐ Ortalama', value: average, inline: true },
-                { name: '📌 Rəy', value: comment }
-            )
-            .setTimestamp();
-
-        return await interaction.reply({ embeds: [embed] });
+    if (!session) {
+        return interaction.reply({
+            content: 'Session tapılmadı! Yenidən başlayın.',
+            ephemeral: true
+        });
     }
+
+    const { cadetId, data1 } = session;
+
+    const report = interaction.fields.getTextInputValue('report');
+    const comment = interaction.fields.getTextInputValue('comment');
+
+    const scores = [
+        Number(data1.driving),
+        Number(data1.shooting),
+        Number(data1.comms),
+        Number(data1.situation),
+        Number(data1.command),
+        Number(report)
+    ];
+
+    const average = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+
+    const ftoLogChannel = await getLogChannel(interaction.guild, 'fto-logs');
+    await ftoLogChannel.send(`EVAL:${cadetId}|${interaction.user.id}|${scores.join('|')}|${comment}`);
+
+    const embed = new EmbedBuilder()
+        .setTitle('🎓 Kadet Qiymətləndirməsi')
+        .setColor(0x3498db)
+        .addFields(
+            { name: '👤 Kadet', value: `<@${cadetId}>`, inline: true },
+            { name: '👨‍🏫 Təlimatçı', value: `<@${interaction.user.id}>`, inline: true },
+            { name: '🚗 Nəqliyyat', value: data1.driving, inline: true },
+            { name: '🔫 Atış', value: data1.shooting, inline: true },
+            { name: '💬 Ünsiyyət', value: data1.comms, inline: true },
+            { name: '🧠 Situasiya', value: data1.situation, inline: true },
+            { name: '👮 Komandantlıq', value: data1.command, inline: true },
+            { name: '📝 Hesabat', value: report, inline: true },
+            { name: '⭐ Ortalama', value: average, inline: true },
+            { name: '📌 Rəy', value: comment }
+        )
+        .setTimestamp();
+
+    // session silirik (memory leak olmasın)
+    ftoSessions.delete(interaction.user.id);
+
+    return await interaction.reply({ embeds: [embed] });
+}
 
     // ================= QALAN SİSTEMLƏR (sənin köhnə kodun dəyişməyib) =================
 
