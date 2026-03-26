@@ -129,10 +129,10 @@ client.on('interactionCreate', async interaction => {
             await ftoLogChannel.send(`EVAL:${cadetId}|${interaction.user.id}|${fields.join('|')}`);
 
             const embed = new EmbedBuilder()
-                .setTitle('🎓 Kadet Qiymətləndirməsi')
+                .setTitle('🎓 Cadet Qiymətləndirməsi')
                 .setColor(0x9b59b6)
                 .addFields(
-                    { name: '👤 Kadet', value: `<@${cadetId}>`, inline: true },
+                    { name: '👤 Cadet', value: `<@${cadetId}>`, inline: true },
                     { name: '👨‍🏫 Təlimatçı', value: `<@${interaction.user.id}>`, inline: true },
                     { name: '🚗 Nəqliyyat İdarəetməsi', value: `${fields[0]}/5`, inline: true },
                     { name: '📢 Ünsiyyət Qabiliyyəti', value: `${fields[1]}/5`, inline: true },
