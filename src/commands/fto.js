@@ -7,8 +7,8 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('eval')
-                .setDescription('Kadet qiymətləndirməsi')
-                .addUserOption(option => option.setName('user').setDescription('Qiymətləndiriləcək kadet').setRequired(true)))
+                .setDescription('Cadet qiymətləndirməsi')
+                .addUserOption(option => option.setName('user').setDescription('Qiymətləndiriləcək cadet').setRequired(true)))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles), // Təlimatçı icazəsi
 
     async execute(interaction) {
